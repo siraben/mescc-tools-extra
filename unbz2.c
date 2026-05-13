@@ -50,7 +50,7 @@
 #define SYMBOL_RUNB              1
 
 // Other housekeeping constants
-#define IOBUF_SIZE               4096
+#define IOBUF_SIZE               16384
 
 // Status return values
 #define RETVAL_LAST_BLOCK        (-100)
