@@ -48,17 +48,6 @@ int find_last_char_pos(char* string, char a)
 	return i;
 }
 
-/* Function to find the length of a char**; an array of strings */
-int array_length(char** array)
-{
-	int length = 0;
-	while(array[length] != NULL)
-	{
-		length = length + 1;
-	}
-	return length;
-}
-
 /* PROCESSING FUNCTIONS */
 
 char* directory_dest(char* dest, char* source, int require_directory)
@@ -143,12 +132,13 @@ char* directory_dest(char* dest, char* source, int require_directory)
 	char* basename = calloc(MAX_STRING, sizeof(char));
 	require(basename != NULL, "Memory initialization of basename in directory_dest failed\n");
 	int last_slash_pos = find_last_char_pos(source, '/');
+	int source_len = strlen(source);
 	if(last_slash_pos >= 0)
 	{ /* Yes, there is a slash in it, copy over everything after that pos */
 		unsigned spos; /* source pos */
 		unsigned bpos = 0; /* basename pos */
 		/* Do the actual copy */
-		for(spos = last_slash_pos + 1; spos < strlen(source); spos = spos + 1)
+		for(spos = last_slash_pos + 1; spos < source_len; spos = spos + 1)
 		{
 			basename[bpos] = source[spos];
 			bpos = bpos + 1;
@@ -159,7 +149,8 @@ char* directory_dest(char* dest, char* source, int require_directory)
 		strcpy(basename, source);
 	}
 	/* 2. Ensure our dest (which is a directory) has a trailing slash */
-	if(dest[strlen(dest) - 1] != '/')
+	dest_len = strlen(dest);
+	if(dest[dest_len - 1] != '/')
 	{
 		strcat(dest, "/");
 	}
@@ -234,8 +225,6 @@ int main(int argc, char** argv)
 	verbose = FALSE;
 
 	int i = 1;
-	int j;
-	int args_found;
 	/* Loop arguments */
 	while(i <= argc)
 	{
@@ -262,35 +251,11 @@ int main(int argc, char** argv)
 		}
 		else if(argv[i][0] != '-')
 		{ /* It is not an option */
-			/*
-			 * We can tell if this is the source file or the destination file
-			 * through looking *ahead*. If it is the last of this type of argument then
-			 * it must be the destination. (1 destination, many sources).
-			 */
-			j = i + 1;
-			args_found = 0;
-			while(j < array_length(argv))
-			{
-				if(argv[j][0] != '-')
-				{ /* It's one of these type of arguments */
-					args_found = args_found + 1;
-				}
-				j = j + 1;
-			}
-			if(args_found == 0)
-			{ /* We are setting the destination (there are no more left after this) */
-				dest = calloc(MAX_STRING, sizeof(char));
-				require(dest != NULL, "Memory initialization of dest failed\n");
-				strcpy(dest, argv[i]);
-			}
-			else
-			{ /* We are setting a source */
-				require(sources_index < MAX_ARRAY, "Too many files\n");
-				sources[sources_index] = calloc(MAX_STRING, sizeof(char));
-				require(sources[sources_index] != NULL, "Memory initialization of sources[source_index] failed\n");
-				strcpy(sources[sources_index], argv[i]);
-				sources_index = sources_index + 1;
-			}
+			require(sources_index < MAX_ARRAY, "Too many files\n");
+			sources[sources_index] = calloc(MAX_STRING, sizeof(char));
+			require(sources[sources_index] != NULL, "Memory initialization of sources[source_index] failed\n");
+			strcpy(sources[sources_index], argv[i]);
+			sources_index = sources_index + 1;
 			i = i + 1;
 		}
 		else
@@ -304,7 +269,14 @@ int main(int argc, char** argv)
 	/* Ensure the two values have values */
 	/* Another workaround for short-circuit bug */
 	int error = FALSE;
-	if(sources[0] == NULL) error = TRUE;
+	if(sources_index < 2) error = TRUE;
+	if(error == FALSE)
+	{
+		dest = sources[sources_index - 1];
+		sources_index = sources_index - 1;
+		sources[sources_index] = NULL;
+	}
+	if(error == FALSE) if(sources[0] == NULL) error = TRUE;
 	if(error == FALSE) if(match(sources[0], "")) error = TRUE;
 	require(!error, "Provide a source file\n");
 	error = FALSE;
@@ -314,14 +286,14 @@ int main(int argc, char** argv)
 
 	/* Loop through all of the sources, copying each one */
 	char* this_dest;
-	for(i = 0; i < array_length(sources); i = i + 1)
+	for(i = 0; i < sources_index; i = i + 1)
 	{
 		/* Convert the dest variable to a full path if it's a directory copying to */
 		/*
 		 * Also, if there is more than one source, we have to be copying to
 		 * a directory destination...
 		 */
-		if(array_length(sources) == 1)
+		if(sources_index == 1)
 		{
 			dest = directory_dest(dest, sources[i], FALSE);
 			copy_file(sources[i], dest);
@@ -330,8 +302,10 @@ int main(int argc, char** argv)
 		{
 			this_dest = calloc(MAX_STRING, sizeof(char));
 			require(this_dest != NULL, "Memory initalization of this_dest failed\n");
-			this_dest = directory_dest(dest, sources[i], TRUE);
+			strcpy(this_dest, dest);
+			this_dest = directory_dest(this_dest, sources[i], TRUE);
 			copy_file(sources[i], this_dest);
+			free(this_dest);
 		}
 		/* Perform the actual copy */
 		free(sources[i]);
