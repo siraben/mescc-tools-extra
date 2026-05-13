@@ -198,6 +198,25 @@ int verify_checksum(char const* p)
 	return (u == r);
 }
 
+size_t read_archive_block(FILE* a, char* buff)
+{
+#ifdef __M2__
+	int remaining;
+	int bytes;
+
+	remaining = a->buflen - a->bufpos;
+	if(0 >= remaining) return 0;
+
+	bytes = 512;
+	if(remaining < bytes) bytes = remaining;
+	memcpy(buff, a->buffer + a->bufpos, bytes);
+	a->bufpos = a->bufpos + bytes;
+	return bytes;
+#else
+	return fread(buff, sizeof(char), 512, a);
+#endif
+}
+
 /* Extract a tar archive. */
 int untar(FILE *a, char const* path)
 {
@@ -218,7 +237,7 @@ int untar(FILE *a, char const* path)
 	while(TRUE)
 	{
 		memset(buff, 0, 514);
-		bytes_read = fread(buff, sizeof(char), 512, a);
+		bytes_read = read_archive_block(a, buff);
 
 		if(bytes_read < 512)
 		{
@@ -344,7 +363,7 @@ int untar(FILE *a, char const* path)
 
 		while(filesize > 0)
 		{
-			bytes_read = fread(buff, 1, 512, a);
+			bytes_read = read_archive_block(a, buff);
 
 			if(bytes_read < 512)
 			{
