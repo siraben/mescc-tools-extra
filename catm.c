@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 262144
 
 /********************************************************************************
  * the reason why we are using read and write instead of fread and fwrite is    *
