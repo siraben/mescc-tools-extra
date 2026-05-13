@@ -40,9 +40,9 @@ int parents;
 /* Create a directory, including parent directories as necessary. */
 void create_dir(char *pathname, int mode)
 {
-	char *p;
 	int r;
 	int len;
+	int i;
 
 	require(NULL != pathname, "mkdir: missing directory operand\n");
 	len = strlen(pathname);
@@ -54,22 +54,26 @@ void create_dir(char *pathname, int mode)
 		pathname[len - 1] = '\0';
 	}
 
-	/* Try creating the directory. */
-	r = mkdir(pathname, mode);
-
-	if((r != 0) && parents)
+	if(parents)
 	{
-		/* On failure, try creating parent directory. */
-		p = strrchr(pathname, '/');
-
-		if(p != NULL)
+		i = 1;
+		while(i < len)
 		{
-			p[0] = '\0';
-			create_dir(pathname, mode);
-			p[0] = '/';
-			r = mkdir(pathname, mode);
+			if(pathname[i] == '/')
+			{
+				pathname[i] = '\0';
+				if(pathname[0] != '\0')
+				{
+					mkdir(pathname, mode);
+				}
+				pathname[i] = '/';
+			}
+			i = i + 1;
 		}
 	}
+
+	/* Try creating the directory. */
+	r = mkdir(pathname, mode);
 
 	if((r != 0) && !parents)
 	{

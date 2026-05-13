@@ -100,9 +100,9 @@ int is_end_of_archive(char const* p)
 /* Create a directory, including parent directories as necessary. */
 int create_dir(char *pathname, int mode)
 {
-	char *p;
 	int r;
 	int len;
+	int i;
 
 	require(NULL != pathname, "untar: empty path in archive\n");
 	len = strlen(pathname);
@@ -117,21 +117,22 @@ int create_dir(char *pathname, int mode)
 	/* Try creating the directory. */
 	if(!FUZZING)
 	{
-		r = mkdir(pathname, mode);
-
-		if(r != 0)
+		i = 1;
+		while(i < len)
 		{
-			/* On failure, try creating parent directory. */
-			p = strrchr(pathname, '/');
-
-			if(p != NULL)
+			if(pathname[i] == '/')
 			{
-				p[0] = '\0';
-				create_dir(pathname, 0755);
-				p[0] = '/';
-				r = mkdir(pathname, mode);
+				pathname[i] = '\0';
+				if(pathname[0] != '\0')
+				{
+					mkdir(pathname, 0755);
+				}
+				pathname[i] = '/';
 			}
+			i = i + 1;
 		}
+
+		r = mkdir(pathname, mode);
 
 		if(r != 0)
 		{
