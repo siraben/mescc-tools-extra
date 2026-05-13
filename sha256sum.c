@@ -25,6 +25,7 @@
 
 #define CHUNK_SIZE 64
 #define TOTAL_LEN_LEN 8
+#define SHA256_READ_BUFFER_SIZE 262144
 
 int mask;
 
@@ -116,13 +117,15 @@ unsigned* init_h()
 	return h;
 }
 
-struct buffer_state
+struct sha256_context
 {
-	char* p;
-	size_t len;
+	unsigned* k;
+	unsigned* h;
+	unsigned* ah;
+	unsigned* w;
+	char* chunk;
+	size_t chunk_len;
 	size_t total_len;
-	int single_one_delivered; /* bool */
-	int total_len_delivered; /* bool */
 };
 
 unsigned right_rot(unsigned value, unsigned count)
@@ -139,116 +142,13 @@ unsigned right_rot(unsigned value, unsigned count)
 	return hold;
 }
 
-void init_buf_state(struct buffer_state * state, char* input, size_t len)
+void sha256_transform(struct sha256_context* ctx)
 {
-	state->p = input;
-	state->len = len;
-	state->total_len = len;
-	state->single_one_delivered = 0;
-	state->total_len_delivered = 0;
-}
-
-/* Return value: bool */
-int calc_chunk(char* chunk, struct buffer_state * state)
-{
-	size_t space_in_chunk;
-
-	if(state->total_len_delivered)
-	{
-		return 0;
-	}
-
-	if(state->len >= CHUNK_SIZE)
-	{
-		memcpy(chunk, state->p, CHUNK_SIZE);
-		state->p += CHUNK_SIZE;
-		state->len -= CHUNK_SIZE;
-		return 1;
-	}
-
-	memcpy(chunk, state->p, state->len);
-	chunk += state->len;
-	space_in_chunk = CHUNK_SIZE - state->len;
-	state->p += state->len;
-	state->len = 0;
-
-	/* If we are here, space_in_chunk is one at minimum. */
-	if(!state->single_one_delivered)
-	{
-		chunk[0] = 0x80;
-		chunk += 1;
-		space_in_chunk -= 1;
-		state->single_one_delivered = 1;
-	}
-
-	/*
-	 * Now:
-	 * - either there is enough space left for the total length, and we can conclude,
-	 * - or there is too little space left, and we have to pad the rest of this chunk with zeroes.
-	 * In the latter case, we will conclude at the next invocation of this function.
-	 */
-	if(space_in_chunk >= TOTAL_LEN_LEN)
-	{
-		size_t left = space_in_chunk - TOTAL_LEN_LEN;
-		size_t len = state->total_len;
-		int i;
-		memset(chunk, 0x00, left);
-		chunk += left;
-		/* Storing of len * 8 as a big endian 64-bit without overflow. */
-		chunk[7] = (len << 3);
-		len >>= 5;
-
-		for(i = 6; i >= 0; i -= 1)
-		{
-			chunk[i] = len;
-			len >>= 8;
-		}
-
-		state->total_len_delivered = 1;
-	}
-	else
-	{
-		memset(chunk, 0x00, space_in_chunk);
-	}
-
-	return 1;
-}
-
-/*
- * Limitations:
- * - Since input is a pointer in RAM, the data to hash should be in RAM, which could be a problem
- *   for large data sizes.
- * - SHA algorithms theoretically operate on bit strings. However, this implementation has no support
- *   for bit string lengths that are not multiples of eight, and it really operates on arrays of bytes.
- *   In particular, the len parameter is a number of bytes.
- */
-void calc_sha_256(char* hash, char* input, size_t len)
-{
-	/*
-	 * Note 1: All integers (expect indexes) are 32-bit unsigned integers and addition is calculated modulo 2^32.
-	 * Note 2: For each round, there is one round constant k[i] and one entry in the message schedule array w[i], 0 = i = 63
-	 * Note 3: The compression function uses 8 working variables, a through h
-	 * Note 4: Big-endian convention is used when expressing the constants in this pseudocode,
-	 *     and when parsing message block data from bytes to words, for example,
-	 *     the first word of the input message "abc" after padding is 0x61626380
-	 */
-	/*
-	 * Initialize hash values:
-	 * (first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19):
-	 */
-	unsigned* k = init_k();
-	unsigned* h = init_h();
 	unsigned i;
 	unsigned j;
 	unsigned hold1;
 	unsigned hold2;
-	/* 512-bit chunks is what we will operate on. */
-	char* chunk = calloc(65, sizeof(char));
-	struct buffer_state* state = calloc(1, sizeof(struct buffer_state));
-	init_buf_state(state, input, len);
-	unsigned* ah = calloc(9, sizeof(unsigned));
-	char *p;
-	unsigned* w = calloc(17, sizeof(unsigned));
+	char* p = ctx->chunk;
 	unsigned s0;
 	unsigned s1;
 	unsigned ch;
@@ -256,92 +156,178 @@ void calc_sha_256(char* hash, char* input, size_t len)
 	unsigned temp2;
 	unsigned maj;
 
-	while(calc_chunk(chunk, state))
+	for(i = 0; i < 8; i += 1)
 	{
-		p = chunk;
+		ctx->ah[i] = ctx->h[i];
+	}
 
-		/* Initialize working variables to current hash value: */
-		for(i = 0; i < 8; i += 1)
+	for(i = 0; i < 4; i += 1)
+	{
+		for(j = 0; j < 16; j += 1)
 		{
-			ah[i] = h[i];
-		}
-
-		/* Compression function main loop: */
-		for(i = 0; i < 4; i += 1)
-		{
-			/*
-			 * The w-array is really w[64], but since we only need
-			 * 16 of them at a time, we save stack by calculating
-			 * 16 at a time.
-			 *
-			 * This optimization was not there initially and the
-			 * rest of the comments about w[64] are kept in their
-			 * initial state.
-			 */
-			/*
-			 * create a 64-entry message schedule array w[0..63] of 32-bit words
-			 * (The initial values in w[0..63] don't matter, so many implementations zero them here)
-			 * copy chunk into first 16 words w[0..15] of the message schedule array
-			 */
-
-			for(j = 0; j < 16; j += 1)
+			if(i == 0)
 			{
-				if(i == 0)
-				{
-					w[j] = ((p[0] & 0xFF) << 24) | ((p[1] & 0xFF) << 16) | ((p[2] & 0xFF) << 8) | (p[3] & 0xFF);
-					p += 4;
-				}
-				else
-				{
-					/* Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array: */
-					hold1 = (j + 1) & 0xf;
-					hold2 = w[hold1];
-					s0 = right_rot(hold2, 7) ^ right_rot(hold2, 18) ^ ((hold2 & mask) >> 3);
-
-					hold1 = (j + 14) & 0xf;
-					hold2 = w[hold1];
-					s1 = right_rot(hold2, 17) ^ right_rot(hold2, 19) ^ ((hold2 & mask) >> 10);
-
-					w[j] += s0 + w[(j + 9) & 0xf] + s1;
-				}
-
-				s1 = right_rot(ah[4], 6) ^ right_rot(ah[4], 11) ^ right_rot(ah[4], 25);
-				ch = (ah[4] & ah[5]) ^ (~ah[4] & ah[6]);
-				temp1 = ah[7] + s1 + ch + k[i << 4 | j] + w[j];
-				s0 = right_rot(ah[0], 2) ^ right_rot(ah[0], 13) ^ right_rot(ah[0], 22);
-				maj = (ah[0] & ah[1]) ^ (ah[0] & ah[2]) ^ (ah[1] & ah[2]);
-				temp2 = s0 + maj;
-				ah[7] = ah[6];
-				ah[6] = ah[5];
-				ah[5] = ah[4];
-				ah[4] = ah[3] + temp1;
-				ah[3] = ah[2];
-				ah[2] = ah[1];
-				ah[1] = ah[0];
-				ah[0] = temp1 + temp2;
+				ctx->w[j] = ((p[0] & 0xFF) << 24) | ((p[1] & 0xFF) << 16) | ((p[2] & 0xFF) << 8) | (p[3] & 0xFF);
+				p += 4;
 			}
-		}
+			else
+			{
+				/* Keep a 16-word rolling window of SHA-256's 64-word schedule. */
+				hold1 = (j + 1) & 0xf;
+				hold2 = ctx->w[hold1];
+				s0 = right_rot(hold2, 7) ^ right_rot(hold2, 18) ^ ((hold2 & mask) >> 3);
 
-		/* Add the compressed chunk to the current hash value: */
-		for(i = 0; i < 8; i +=  1)
-		{
-			h[i] += ah[i];
+				hold1 = (j + 14) & 0xf;
+				hold2 = ctx->w[hold1];
+				s1 = right_rot(hold2, 17) ^ right_rot(hold2, 19) ^ ((hold2 & mask) >> 10);
+
+				ctx->w[j] += s0 + ctx->w[(j + 9) & 0xf] + s1;
+			}
+
+			s1 = right_rot(ctx->ah[4], 6) ^ right_rot(ctx->ah[4], 11) ^ right_rot(ctx->ah[4], 25);
+			ch = (ctx->ah[4] & ctx->ah[5]) ^ (~ctx->ah[4] & ctx->ah[6]);
+			temp1 = ctx->ah[7] + s1 + ch + ctx->k[i << 4 | j] + ctx->w[j];
+			s0 = right_rot(ctx->ah[0], 2) ^ right_rot(ctx->ah[0], 13) ^ right_rot(ctx->ah[0], 22);
+			maj = (ctx->ah[0] & ctx->ah[1]) ^ (ctx->ah[0] & ctx->ah[2]) ^ (ctx->ah[1] & ctx->ah[2]);
+			temp2 = s0 + maj;
+			ctx->ah[7] = ctx->ah[6];
+			ctx->ah[6] = ctx->ah[5];
+			ctx->ah[5] = ctx->ah[4];
+			ctx->ah[4] = ctx->ah[3] + temp1;
+			ctx->ah[3] = ctx->ah[2];
+			ctx->ah[2] = ctx->ah[1];
+			ctx->ah[1] = ctx->ah[0];
+			ctx->ah[0] = temp1 + temp2;
 		}
 	}
 
-	/* Produce the final hash value (big-endian): */
-	i = 0;
-	for(j = 0; i < 8; i += 1)
+	for(i = 0; i < 8; i +=  1)
 	{
-		hash[j] = ((h[i] >> 24) & 0xFF);
+		ctx->h[i] += ctx->ah[i];
+	}
+}
+
+struct sha256_context* sha256_context_init()
+{
+	struct sha256_context* ctx = calloc(1, sizeof(struct sha256_context));
+	require(NULL != ctx, "sha256 context allocation failed\n");
+	ctx->k = init_k();
+	ctx->h = init_h();
+	ctx->ah = calloc(9, sizeof(unsigned));
+	ctx->w = calloc(17, sizeof(unsigned));
+	ctx->chunk = calloc(CHUNK_SIZE + 1, sizeof(char));
+	require(NULL != ctx->ah, "sha256 working state allocation failed\n");
+	require(NULL != ctx->w, "sha256 schedule allocation failed\n");
+	require(NULL != ctx->chunk, "sha256 chunk allocation failed\n");
+	ctx->chunk_len = 0;
+	ctx->total_len = 0;
+	return ctx;
+}
+
+void sha256_update(struct sha256_context* ctx, char* input, size_t len)
+{
+	size_t i = 0;
+
+	while(i < len)
+	{
+		ctx->chunk[ctx->chunk_len] = input[i];
+		ctx->chunk_len = ctx->chunk_len + 1;
+		ctx->total_len = ctx->total_len + 1;
+		i = i + 1;
+		if(ctx->chunk_len == CHUNK_SIZE)
+		{
+			sha256_transform(ctx);
+			ctx->chunk_len = 0;
+		}
+	}
+}
+
+void sha256_final(struct sha256_context* ctx, char* hash)
+{
+	size_t len = ctx->total_len;
+	int i;
+	int j;
+
+	ctx->chunk[ctx->chunk_len] = 0x80;
+	ctx->chunk_len = ctx->chunk_len + 1;
+
+	if(ctx->chunk_len > (CHUNK_SIZE - TOTAL_LEN_LEN))
+	{
+		while(ctx->chunk_len < CHUNK_SIZE)
+		{
+			ctx->chunk[ctx->chunk_len] = 0;
+			ctx->chunk_len = ctx->chunk_len + 1;
+		}
+		sha256_transform(ctx);
+		ctx->chunk_len = 0;
+	}
+
+	while(ctx->chunk_len < (CHUNK_SIZE - TOTAL_LEN_LEN))
+	{
+		ctx->chunk[ctx->chunk_len] = 0;
+		ctx->chunk_len = ctx->chunk_len + 1;
+	}
+
+	ctx->chunk[63] = (len << 3);
+	len >>= 5;
+	for(i = 62; i >= 56; i -= 1)
+	{
+		ctx->chunk[i] = len;
+		len >>= 8;
+	}
+	sha256_transform(ctx);
+
+	j = 0;
+	for(i = 0; i < 8; i += 1)
+	{
+		hash[j] = ((ctx->h[i] >> 24) & 0xFF);
 		j += 1;
-		hash[j] = ((h[i] >> 16) & 0xFF);
+		hash[j] = ((ctx->h[i] >> 16) & 0xFF);
 		j += 1;
-		hash[j] = ((h[i] >> 8) & 0xFF);
+		hash[j] = ((ctx->h[i] >> 8) & 0xFF);
 		j += 1;
-		hash[j] = (h[i] & 0xFF);
+		hash[j] = (ctx->h[i] & 0xFF);
 		j += 1;
 	}
+}
+
+/*
+ * This helper hashes a caller-provided byte array. File inputs use
+ * calc_sha_256_file so they do not need to be loaded entirely into memory.
+ *
+ * SHA algorithms theoretically operate on bit strings. This implementation
+ * hashes byte arrays, so len is a number of bytes.
+ */
+void calc_sha_256(char* hash, char* input, size_t len)
+{
+	struct sha256_context* ctx = sha256_context_init();
+	sha256_update(ctx, input, len);
+	sha256_final(ctx, hash);
+}
+
+int calc_sha_256_file(char* hash, char* filename)
+{
+	struct sha256_context* ctx;
+	char* buffer;
+	FILE* f;
+	size_t bytes;
+
+	f = fopen(filename, "r");
+	if(NULL == f) return FALSE;
+
+	ctx = sha256_context_init();
+	buffer = calloc(SHA256_READ_BUFFER_SIZE + 1, sizeof(char));
+	require(NULL != buffer, "sha256 input buffer allocation failed\n");
+read_more:
+	bytes = fread(buffer, 1, SHA256_READ_BUFFER_SIZE, f);
+	sha256_update(ctx, buffer, bytes);
+	if(SHA256_READ_BUFFER_SIZE == bytes)
+	{
+		goto read_more;
+	}
+	fclose(f);
+	sha256_final(ctx, hash);
+	return TRUE;
 }
 
 struct list
@@ -394,12 +380,9 @@ int check_file(char* b, char* filename)
 	size_t i;
 	int hold1;
 	int hold2;
-	FILE* f;
 	char* name = calloc(4097, sizeof(char));
 	char* hash = calloc(33, sizeof(char));
 	char* hash2 = calloc(33, sizeof(char));
-	size_t size;
-	char* buffer;
 go_again:
 	for(i = 0; i < 32; i += 1)
 	{
@@ -428,8 +411,7 @@ go_again:
 		b += 1;
 	}
 
-	f = fopen(name, "r");
-	if(NULL == f)
+	if(!calc_sha_256_file(hash2, name))
 	{
 		fputs(name, stdout);
 		puts(": No such file or directory");
@@ -437,17 +419,6 @@ go_again:
 	}
 	else
 	{
-#ifdef __M2__
-		size = f->buflen;
-		buffer = f->buffer;
-#else
-		fseek(f, 0, SEEK_END);
-		size = ftell(f);
-		rewind(f);
-		buffer = calloc(size + 1, sizeof(char));
-		fread(buffer, sizeof(char), size, f);
-#endif
-		calc_sha_256(hash2, buffer, size);
 		if(match(hash_to_string(hash), hash_to_string(hash2)))
 		{
 			fputs(name, stdout);
@@ -489,6 +460,7 @@ int main(int argc, char **argv)
 	struct list* l = NULL;
 	struct list* t = NULL;
 	size_t read;
+	FILE* f;
 	int check = FALSE;
 	int r = TRUE;
 	char* output_file = "";
@@ -528,22 +500,7 @@ int main(int argc, char **argv)
 			t = calloc(1, sizeof(struct list));
 			t->hash = calloc(33, sizeof(char));
 			t->name = argv[i];
-			t->f = fopen(t->name, "r");
-			if(NULL != t->f)
-			{
-				t->found = TRUE;
-#ifdef __M2__
-				t->size = t->f->buflen;
-				t->buffer = t->f->buffer;
-#else
-				fseek(t->f, 0, SEEK_END);
-				t->size = ftell(t->f);
-				rewind(t->f);
-				t->buffer = calloc(t->size + 1, sizeof(char));
-				read = fread(t->buffer, sizeof(char), t->size, t->f);
-				require(read == t->size, "incomplete read of input\n");
-#endif
-			}
+			t->found = TRUE;
 			t->next = l;
 			l = t;
 			i += 1;
@@ -557,6 +514,24 @@ int main(int argc, char **argv)
 		{
 			if(l->found)
 			{
+				f = fopen(l->name, "r");
+				if(NULL == f)
+				{
+					fputs(l->name, stdout);
+					puts(": No such file or directory");
+					exit(EXIT_FAILURE);
+				}
+#ifdef __M2__
+				l->size = f->buflen;
+				l->buffer = f->buffer;
+#else
+				fseek(f, 0, SEEK_END);
+				l->size = ftell(f);
+				rewind(f);
+				l->buffer = calloc(l->size + 1, sizeof(char));
+				read = fread(l->buffer, sizeof(char), l->size, f);
+				require(read == l->size, "incomplete read of input\n");
+#endif
 				if(!check_file(l->buffer, l->name)) r = FALSE;
 			}
 			else
@@ -572,9 +547,8 @@ int main(int argc, char **argv)
 	{
 		while(NULL != l)
 		{
-			if(l->found)
+			if(calc_sha_256_file(l->hash, l->name))
 			{
-				calc_sha_256(l->hash, l->buffer, l->size);
 				fputs(hash_to_string(l->hash), output);
 				fputs("  ", output);
 				fputs(l->name, output);
