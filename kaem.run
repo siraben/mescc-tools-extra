@@ -24,7 +24,8 @@ ENDIAN_FLAG="--little-endian"
 BASE_ADDRESS="0x08048000"
 BINDIR="bin"
 BUILDDIR="artifact"
+OPERATING_SYSTEM="Linux"
 
 mkdir -p bin
 mkdir -p artifact
-kaem --verbose --strict -f mescc-tools-extra.kaem
+${TOOLS}/bake --file mescc-tools-extra.bake all
