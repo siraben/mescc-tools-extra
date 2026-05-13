@@ -437,11 +437,16 @@ go_again:
 	}
 	else
 	{
+#ifdef __M2__
+		size = f->buflen;
+		buffer = f->buffer;
+#else
 		fseek(f, 0, SEEK_END);
 		size = ftell(f);
 		rewind(f);
 		buffer = calloc(size + 1, sizeof(char));
 		fread(buffer, sizeof(char), size, f);
+#endif
 		calc_sha_256(hash2, buffer, size);
 		if(match(hash_to_string(hash), hash_to_string(hash2)))
 		{
@@ -527,12 +532,17 @@ int main(int argc, char **argv)
 			if(NULL != t->f)
 			{
 				t->found = TRUE;
+#ifdef __M2__
+				t->size = t->f->buflen;
+				t->buffer = t->f->buffer;
+#else
 				fseek(t->f, 0, SEEK_END);
 				t->size = ftell(t->f);
 				rewind(t->f);
 				t->buffer = calloc(t->size + 1, sizeof(char));
 				read = fread(t->buffer, sizeof(char), t->size, t->f);
 				require(read == t->size, "incomplete read of input\n");
+#endif
 			}
 			t->next = l;
 			l = t;
