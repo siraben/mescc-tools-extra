@@ -24,6 +24,7 @@
 
 #define MAX_STRING 4096
 #define MAX_ARRAY 256
+#define COPY_BUFFER_SIZE 262144
 
 /* Globals */
 int verbose;
@@ -172,6 +173,9 @@ char* directory_dest(char* dest, char* source, int require_directory)
 
 void copy_file(char* source, char* dest)
 {
+	int bytes;
+	int written;
+
 	if(verbose)
 	{ /* Output message */
 		/* Of the form 'source' -> 'dest' */
@@ -182,17 +186,17 @@ void copy_file(char* source, char* dest)
 		fputs("'\n", stdout);
 	}
 
-	/* Open source and dest as FILE*s */
-	FILE* fsource = fopen(source, "r");
-	if(fsource == NULL)
+	/* Open source and dest. */
+	int fsource = open(source, 0, 0);
+	if(fsource < 0)
 	{
 		fputs("Error opening source file ", stderr);
 		fputs(source, stderr);
 		fputc('\n', stderr);
 		exit(EXIT_FAILURE);
 	}
-	FILE* fdest = fopen(dest, "w");
-	if(fdest == NULL)
+	int fdest = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if(fdest < 0)
 	{
 		fputs("Error opening destination file", stderr);
 		fputs(dest, stderr);
@@ -200,20 +204,22 @@ void copy_file(char* source, char* dest)
 		exit(EXIT_FAILURE);
 	}
 
-	/*
-	 * The following loop reads a character from the source and writes it to the
-	 * dest file. This is all M2-Planet supports.
-	 */
-	int c = fgetc(fsource);
-	while(c != EOF)
+	char* buffer = calloc(COPY_BUFFER_SIZE + 1, sizeof(char));
+	require(buffer != NULL, "Memory initialization of copy buffer failed\n");
+keep:
+	bytes = read(fsource, buffer, COPY_BUFFER_SIZE);
+	require(0 <= bytes, "Error reading source file\n");
+	written = write(fdest, buffer, bytes);
+	require(bytes == written, "Error writing destination file\n");
+	if(COPY_BUFFER_SIZE == bytes)
 	{
-		fputc(c, fdest);
-		c = fgetc(fsource);
+		goto keep;
 	}
 
 	/* Cleanup */
-	fclose(fsource);
-	fclose(fdest);
+	require(0 == close(fsource), "Error closing source file\n");
+	require(0 == close(fdest), "Error closing destination file\n");
+	free(buffer);
 }
 
 int main(int argc, char** argv)
