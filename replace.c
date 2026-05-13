@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include "M2libc/bootstrappable.h"
 
+#define OUTPUT_BUFFER_SIZE 4096
+
 char* input_name;
 FILE* input;
 char* output_name;
@@ -31,6 +33,38 @@ char* replacement;
 char* buffer;
 size_t buffer_index;
 char* hold;
+char* output_buffer;
+int output_buffer_index;
+
+void flush_output()
+{
+	if(0 == output_buffer_index) return;
+#ifdef __M2__
+	require(output_buffer_index == write(output->fd, output_buffer, output_buffer_index), "incomplete write of output\n");
+#else
+	require(output_buffer_index == fwrite(output_buffer, 1, output_buffer_index, output), "incomplete write of output\n");
+#endif
+	output_buffer_index = 0;
+}
+
+void write_output_byte(int c)
+{
+	if(0 == c) return;
+
+	output_buffer[output_buffer_index] = c;
+	output_buffer_index = output_buffer_index + 1;
+	if(OUTPUT_BUFFER_SIZE == output_buffer_index) flush_output();
+}
+
+void write_output_string(char* s)
+{
+	size_t i = 0;
+	while(0 != s[i])
+	{
+		write_output_byte(s[i]);
+		i = i + 1;
+	}
+}
 
 void read_next_byte()
 {
@@ -46,7 +80,7 @@ void read_next_byte()
 	buffer_index = buffer_index + 1;
 
 	/* NEVER WRITE NULLS!!! */
-	if(0 != c) fputc(c, output);
+	write_output_byte(c);
 }
 
 void clear_hold()
@@ -65,7 +99,7 @@ void check_match()
 	/* Do the actual replacing */
 	if(match(pattern, hold))
 	{
-		fputs(replacement, output);
+		write_output_string(replacement);
 		clear_hold();
 	}
 }
@@ -137,14 +171,21 @@ int main(int argc, char** argv)
 	input = fopen(input_name, "r");
 	require(NULL != input, "unable to open requested input file!\n");
 
+#ifdef __M2__
+	size_t size = input->buflen;
+#else
 	/* Get enough buffer to read it all */
 	fseek(input, 0, SEEK_END);
 	size_t size = ftell(input);
+#endif
 
 	/* Save ourself work if the input file is too small */
 	pattern_length = strlen(pattern);
 	require(0 < pattern_length, "replacement pattern must not be empty\n");
 	require(pattern_length <= size, "input file is to small for pattern\n");
+#ifdef __M2__
+	buffer = input->buffer;
+#else
 	buffer = calloc(size + pattern_length + 8, sizeof(char));
 	require(NULL != buffer, "input buffer allocation failed\n");
 
@@ -153,10 +194,14 @@ int main(int argc, char** argv)
 	size_t r = fread(buffer,sizeof(char), size, input);
 	require(r == size, "incomplete read of input\n");
 	fclose(input);
+#endif
 
 	/* Now we can safely open the output (which could have been the same as the input */
 	output = fopen(output_name, "w");
 	require(NULL != output, "unable to open requested output file!\n");
+	output_buffer = calloc(OUTPUT_BUFFER_SIZE, sizeof(char));
+	require(NULL != output_buffer, "output buffer allocation failed\n");
+	output_buffer_index = 0;
 
 	/* build our match buffer */
 	hold = calloc(pattern_length + 4, sizeof(char));
@@ -168,5 +213,9 @@ int main(int argc, char** argv)
 		read_next_byte();
 		check_match();
 	}
+	flush_output();
 	fclose(output);
+#ifdef __M2__
+	fclose(input);
+#endif
 }
