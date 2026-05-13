@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>  /* memcpy(), memmove() */
 #include <unistd.h>  /* read(), write() */
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>  /* realloc() */
 #include "M2libc/bootstrappable.h"
@@ -137,7 +138,7 @@
 #define BITS32 (0x7FFFFFFF | BIT31)
 #define HIGHBITS (0xFFFFFFFF - BITS32)
 
-FILE* destination;
+int destination;
 FILE* source;
 uint32_t pos;
 
@@ -214,12 +215,10 @@ void Flush()
 {
 	/* print the bytes in the buffer until done */
 	uint8_t* p = global->dicf + global->writtenPos;
-	uint8_t* q = global->dicf + global->dicfPos;
-
-	while(p < q)
+	int count = global->dicfPos - global->writtenPos;
+	if(0 < count)
 	{
-		fputc(0xFF & p[0], destination);
-		p = p + 1;
+		require(count == write(destination, p, count), "unxz: incomplete write of output\n");
 	}
 
 	global->writtenPos = global->dicfPos;
@@ -2417,11 +2416,11 @@ int main(int argc, char **argv)
 		fputs(" not found!\n", stderr);
 		return 1;
 	}
-	if(NULL != dest) destination = fopen(dest, "w");
-	else destination = stdout;
+	if(NULL != dest) destination = open(dest, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+	else destination = STDOUT_FILENO;
 
-	if(FUZZING) destination = fopen("/dev/null", "w");
-	require(NULL != destination, "unable to open output file for writing\n");
+	if(FUZZING) destination = open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0600);
+	require(0 <= destination, "unable to open output file for writing\n");
 	global = calloc(1, sizeof(struct CLzmaDec));
 	global->readBuf = calloc(sizeof_readBuf, sizeof(uint8_t));
 	global->readCur = global->readBuf;
@@ -2432,5 +2431,9 @@ int main(int argc, char **argv)
 	free(global->dicf);  /* Pacify valgrind(1). */
 	free(global->readBuf);
 	free(global);
+	if(2 < destination)
+	{
+		require(0 == close(destination), "unable to close output file\n");
+	}
 	return res;
 }
