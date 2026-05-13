@@ -23,10 +23,13 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "M2libc/bootstrappable.h"
 
 #define KECCAKF_ROUNDS 24
+#define INPUT_BUFFER_SIZE 262144
 
 #if defined(__M2__)
 #define uint32_t unsigned
@@ -198,14 +201,18 @@ int main(int argc, char **argv)
 	struct keccakf_const* kc = calloc(1, sizeof(struct keccakf_const));
 	uint32_t* bc = calloc(10, sizeof(uint32_t));
 	char* filename;
-	FILE* ff;
+	int fd;
 	char* mdhex = calloc(1, 512 / 4 + 1);
 	char* hextable = "0123456789abcdef";
+	char* input_buffer = calloc(INPUT_BUFFER_SIZE + 1, sizeof(char));
 	int c;
+	int bytes;
 	int rsiz;
 	int pt;
 	int i;
+	int j;
 	uint8_t v;
+	require(NULL != input_buffer, "input buffer allocation failed\n");
 
 	keccakf_init(kc);
 
@@ -245,18 +252,27 @@ int main(int argc, char **argv)
 			rsiz = 200 - (algorithm / 4);
 			filename = argv[option_index];
 			option_index = option_index + 1;
-			ff = fopen(filename, "rb");
-			require(ff != NULL, "Input file cannot be opened!\n");
+			fd = open(filename, O_RDONLY, 0);
+			require(fd >= 0, "Input file cannot be opened!\n");
 			pt = 0;
-			while((c = fgetc(ff)) != EOF) {
+		read_more:
+			bytes = read(fd, input_buffer, INPUT_BUFFER_SIZE);
+			require(bytes >= 0, "Input file cannot be read!\n");
+			j = 0;
+			while(j < bytes) {
+				c = input_buffer[j] & 0xff;
 				st8[pt] = ((st8[pt] & 0xff) ^ c) & 0xff;
 				pt = pt + 1;
 				if (pt >= rsiz) {
 					sha3_keccakf(kc, state, bc);
 					pt = 0;
 				}
+				j = j + 1;
 			}
-			fclose(ff);
+			if(INPUT_BUFFER_SIZE == bytes) {
+				goto read_more;
+			}
+			require(0 == close(fd), "Input file cannot be closed!\n");
 			st8[pt] = ((st8[pt] & 0xff)^ 0x06) & 0xff;
 			st8[rsiz - 1] = ((st8[rsiz - 1]& 0xff) ^ 0x80) & 0xff;
 			sha3_keccakf(kc, state, bc);
