@@ -31,10 +31,9 @@ char* pattern;
 size_t pattern_length;
 char* replacement;
 char* buffer;
-size_t buffer_index;
-char* hold;
 char* output_buffer;
 int output_buffer_index;
+int* prefix_table;
 
 void flush_output()
 {
@@ -66,42 +65,67 @@ void write_output_string(char* s)
 	}
 }
 
-void read_next_byte()
+void write_output_range(size_t start, size_t end)
 {
-	int c= hold[0];
-	size_t i = 0;
-	while(i < pattern_length)
+	while(start < end)
 	{
-		hold[i] = hold[i+1];
-		i = i + 1;
-	}
-
-	hold[pattern_length-1] = buffer[buffer_index];
-	buffer_index = buffer_index + 1;
-
-	/* NEVER WRITE NULLS!!! */
-	write_output_byte(c);
-}
-
-void clear_hold()
-{
-	/* FILL hold with NULLS */
-	size_t i = 0;
-	while(i < pattern_length)
-	{
-		hold[i] = 0;
-		i = i + 1;
+		write_output_byte(buffer[start]);
+		start = start + 1;
 	}
 }
 
-void check_match()
+void build_prefix_table()
 {
-	/* Do the actual replacing */
-	if(match(pattern, hold))
+	size_t i = 1;
+	int matched = 0;
+	prefix_table[0] = 0;
+
+	/* KMP fallback table: prefix_table[i] is the next match length to try. */
+	while(i < pattern_length)
 	{
-		write_output_string(replacement);
-		clear_hold();
+		while((0 < matched) && (pattern[i] != pattern[matched]))
+		{
+			matched = prefix_table[matched - 1];
+		}
+		if(pattern[i] == pattern[matched])
+		{
+			matched = matched + 1;
+		}
+		prefix_table[i] = matched;
+		i = i + 1;
 	}
+}
+
+void replace_all(size_t size)
+{
+	size_t i = 0;
+	size_t last_output = 0;
+	int matched = 0;
+	size_t match_start;
+
+	/* Emit unmatched ranges once, and emit replacements at non-overlapping matches. */
+	while(i < size)
+	{
+		while((0 < matched) && (buffer[i] != pattern[matched]))
+		{
+			matched = prefix_table[matched - 1];
+		}
+		if(buffer[i] == pattern[matched])
+		{
+			matched = matched + 1;
+		}
+		if(matched == pattern_length)
+		{
+			match_start = i + 1 - pattern_length;
+			write_output_range(last_output, match_start);
+			write_output_string(replacement);
+			last_output = i + 1;
+			matched = 0;
+		}
+		i = i + 1;
+	}
+
+	write_output_range(last_output, size);
 }
 
 int main(int argc, char** argv)
@@ -109,7 +133,6 @@ int main(int argc, char** argv)
 	output_name = "/dev/stdout";
 	pattern = NULL;
 	replacement = NULL;
-	buffer_index = 0;
 
 	int i = 1;
 	while (i < argc)
@@ -203,16 +226,12 @@ int main(int argc, char** argv)
 	require(NULL != output_buffer, "output buffer allocation failed\n");
 	output_buffer_index = 0;
 
-	/* build our match buffer */
-	hold = calloc(pattern_length + 4, sizeof(char));
-	require(NULL != hold, "temp memory allocation failed\n");
+	prefix_table = calloc(pattern_length + 1, sizeof(int));
+	require(NULL != prefix_table, "prefix table allocation failed\n");
+	build_prefix_table();
 
 	/* Replace it all */
-	while((size + pattern_length + 4) >= buffer_index)
-	{
-		read_next_byte();
-		check_match();
-	}
+	replace_all(size);
 	flush_output();
 	fclose(output);
 #ifdef __M2__
