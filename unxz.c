@@ -141,6 +141,7 @@
 int destination;
 FILE* source;
 uint32_t pos;
+int directSource;
 
 /* For LZMA streams, lc <= 8, lp <= 4, lc + lp <= 8 + 4 == 12.
  * For LZMA2 streams, lc + lp <= 4.
@@ -1874,6 +1875,13 @@ uint32_t Preread(uint32_t r)
 	uint32_t p = global->readEnd - global->readCur;
 	require(r <= sizeof_readBuf, "r <= sizeof_readBuf");
 
+#ifdef __M2__
+	if(directSource)
+	{
+		return p;
+	}
+#endif
+
 	if(p < r)     /* Not enough pending available. */
 	{
 		if(global->readBuf + sizeof_readBuf - global->readCur + 0 < r)
@@ -2422,14 +2430,32 @@ int main(int argc, char **argv)
 	if(FUZZING) destination = open("/dev/null", O_WRONLY|O_CREAT|O_TRUNC, 0600);
 	require(0 <= destination, "unable to open output file for writing\n");
 	global = calloc(1, sizeof(struct CLzmaDec));
-	global->readBuf = calloc(sizeof_readBuf, sizeof(uint8_t));
-	global->readCur = global->readBuf;
-	global->readEnd = global->readBuf;
+#ifdef __M2__
+	if(NULL != name)
+	{
+		directSource = TRUE;
+		global->readBuf = source->buffer;
+		global->readCur = global->readBuf;
+		global->readEnd = global->readBuf + source->buflen;
+	}
+	else
+	{
+#endif
+		directSource = FALSE;
+		global->readBuf = calloc(sizeof_readBuf, sizeof(uint8_t));
+		global->readCur = global->readBuf;
+		global->readEnd = global->readBuf;
+#ifdef __M2__
+	}
+#endif
 	global->allocCapacity = 0;
 	global->dicSize = 0;
 	res = DecompressXzOrLzma();
 	free(global->dicf);  /* Pacify valgrind(1). */
-	free(global->readBuf);
+	if(!directSource)
+	{
+		free(global->readBuf);
+	}
 	free(global);
 	if(2 < destination)
 	{
