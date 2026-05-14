@@ -1,8 +1,5 @@
 : all sha256sum match mkdir untar ungz unbz2 unxz catm cp chmod rm replace wrap
-
-: env
+: sha256sum match mkdir untar ungz unbz2 unxz catm cp chmod rm replace wrap :
 export M2LIBC_PATH ${M2LIBC}
 export PATH ${TOOLS}
-
-: sha256sum match mkdir untar ungz unbz2 unxz catm cp chmod rm replace wrap : env
-${TOOLS}/M2-Mesoplanet --operating-system ${OPERATING_SYSTEM} --architecture ${ARCH} -f $@.c -o ${BINDIR}/$@
+${TOOLS}/M2-Mesoplanet --operating-system ${OPERATING_SYSTEM} --architecture ${ARCH} -o ${BINDIR}/$@ $@.c
