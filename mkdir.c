@@ -57,7 +57,7 @@ void create_dir(char *pathname, int mode)
 		/* On failure, try creating parent directory. */
 		p = strrchr(pathname, '/');
 
-		if(p != NULL)
+		if((p != NULL) && (p != pathname))
 		{
 			p[0] = '\0';
 			create_dir(pathname, mode);
