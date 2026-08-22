@@ -320,7 +320,13 @@ int main(int argc, char** argv)
 		{
 			this_dest = calloc(MAX_STRING, sizeof(char));
 			require(this_dest != NULL, "Memory initalization of this_dest failed\n");
-			this_dest = directory_dest(dest, sources[i], TRUE);
+			/*
+			 * Work on a copy of dest as directory_dest modifies the
+			 * string it is given, which would corrupt the destination
+			 * for all of the sources after this one.
+			 */
+			strcpy(this_dest, dest);
+			this_dest = directory_dest(this_dest, sources[i], TRUE);
 			copy_file(sources[i], this_dest);
 		}
 		/* Perform the actual copy */
