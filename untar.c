@@ -176,7 +176,7 @@ int verify_checksum(char const* p)
 		/* Standard tar checksum adds unsigned bytes. */
 		if((n < 148) || (n > 155))
 		{
-			h = p[n];
+			h = p[n] & 0xFF;
 			u = u + h;
 		}
 		else
