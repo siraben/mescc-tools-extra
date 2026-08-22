@@ -32,6 +32,20 @@ char* buffer;
 size_t buffer_index;
 char* hold;
 
+/* Accumulate output so we write chunks instead of one fputc per byte */
+#define OUT_BUFFER_SIZE 8192
+char out_buffer[OUT_BUFFER_SIZE];
+size_t out_buffer_index;
+
+void flush_output()
+{
+	if(0 < out_buffer_index)
+	{
+		fwrite(out_buffer, 1, out_buffer_index, output);
+		out_buffer_index = 0;
+	}
+}
+
 void read_next_byte()
 {
 	int c= hold[0];
@@ -41,7 +55,12 @@ void read_next_byte()
 	buffer_index = buffer_index + 1;
 
 	/* NEVER WRITE NULLS!!! */
-	if(0 != c) fputc(c, output);
+	if(0 != c)
+	{
+		out_buffer[out_buffer_index] = c;
+		out_buffer_index = out_buffer_index + 1;
+		if(OUT_BUFFER_SIZE == out_buffer_index) flush_output();
+	}
 }
 
 void clear_hold()
@@ -60,6 +79,7 @@ void check_match()
 	/* Do the actual replacing */
 	if(match(pattern, hold))
 	{
+		flush_output();
 		fputs(replacement, output);
 		clear_hold();
 	}
@@ -162,5 +182,6 @@ int main(int argc, char** argv)
 		read_next_byte();
 		check_match();
 	}
+	flush_output();
 	fclose(output);
 }
