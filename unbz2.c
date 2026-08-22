@@ -1121,12 +1121,13 @@ int main(int argc, char **argv)
 	{
 		int length = strlen(name);
 		require(length > 4, "file name length not sufficient, please provide output name with --output $filename\n");
+		require(match(name + length - 4, ".bz2"), "input file name does not end in .bz2, please provide output name with --output $filename\n");
 		/* Assume they want the output file name to be the input file name minus the .bz2 */
-		dest = calloc(length, sizeof(char));
+		dest = calloc(length + 1, sizeof(char));
 		require(NULL != dest, "Failed to allocate new output file name\n");
 		/* do name.bz2 => name */
 		strcpy(dest, name);
-		dest[length-3] = 0;
+		dest[length-4] = 0;
 	}
 
 	int out_fd;
