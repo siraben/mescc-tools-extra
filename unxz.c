@@ -216,10 +216,9 @@ void Flush()
 	uint8_t* p = global->dicf + global->writtenPos;
 	uint8_t* q = global->dicf + global->dicfPos;
 
-	while(p < q)
+	if(p < q)
 	{
-		fputc(0xFF & p[0], destination);
-		p = p + 1;
+		fwrite(p, 1, q - p, destination);
 	}
 
 	global->writtenPos = global->dicfPos;
