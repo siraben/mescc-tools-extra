@@ -194,6 +194,7 @@ int verify_checksum(char const* p)
 int untar(FILE *a, char const* path)
 {
 	char* target = calloc(101, sizeof(char));
+	char* filename = calloc(101, sizeof(char));
 	char* buff = calloc(514, sizeof(char));
 	FILE* f = NULL;
 	size_t bytes_read;
@@ -238,13 +239,20 @@ int untar(FILE *a, char const* path)
 			return FALSE;
 		}
 
+		/*
+		 * Copy out the name so that it is NUL terminated even when it
+		 * fills the whole 100 byte name field of the header.
+		 */
+		memcpy(filename, buff, 100);
+		filename[100] = '\0';
+
 		filesize = parseoct(buff + 124, 12);
 
 		/**
 		 * Long linknames are stored in a special file with the name "././@LongLink"
 		 * and are unsupported by this program.
 		 */
-		if (strcmp(buff, "././@LongLink") == 0) {
+		if (strcmp(filename, "././@LongLink") == 0) {
 			fputs("unable to create long symlink\n", stderr);
 			exit(EXIT_FAILURE);
 		}
@@ -258,7 +266,7 @@ int untar(FILE *a, char const* path)
 				exit(EXIT_FAILURE);
 			}
 			fputs(" Ignoring hardlink ", stdout);
-			puts(buff);
+			puts(filename);
 		}
 		else if('2' == op)
 		{
@@ -267,10 +275,10 @@ int untar(FILE *a, char const* path)
 			if(VERBOSE)
 			{
 				fputs(" Extracting file ", stdout);
-				puts(buff);
+				puts(filename);
 			}
 			if(!FUZZING) {
-				symlink_ret = symlink(target, buff);
+				symlink_ret = symlink(target, filename);
 				if (symlink_ret != 0) {
 					fputs("Failed to create symlink\n", stderr);
 					if(STRICT) exit(EXIT_FAILURE);
@@ -285,7 +293,7 @@ int untar(FILE *a, char const* path)
 				exit(EXIT_FAILURE);
 			}
 			fputs(" Ignoring character device ", stdout);
-			puts(buff);
+			puts(filename);
 		}
 		else if('4' == op)
 		{
@@ -295,16 +303,16 @@ int untar(FILE *a, char const* path)
 				exit(EXIT_FAILURE);
 			}
 			fputs(" Ignoring block device ", stdout);
-			puts(buff);
+			puts(filename);
 		}
 		else if('5' == op)
 		{
 			if(VERBOSE)
 			{
 				fputs(" Extracting dir ", stdout);
-				puts(buff);
+				puts(filename);
 			}
-			create_dir(buff, parseoct(buff + 100, 8));
+			create_dir(filename, parseoct(buff + 100, 8));
 			filesize = 0;
 		}
 		else if('6' == op)
@@ -315,16 +323,16 @@ int untar(FILE *a, char const* path)
 				exit(EXIT_FAILURE);
 			}
 			fputs(" Ignoring FIFO ", stdout);
-			puts(buff);
+			puts(filename);
 		}
 		else
 		{
 			if(VERBOSE)
 			{
 				fputs(" Extracting file ", stdout);
-				puts(buff);
+				puts(filename);
 			}
-			f = create_file(buff);
+			f = create_file(filename);
 		}
 
 		while(filesize > 0)
