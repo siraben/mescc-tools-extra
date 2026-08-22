@@ -35,12 +35,7 @@ char* hold;
 void read_next_byte()
 {
 	int c= hold[0];
-	size_t i = 0;
-	while(i < pattern_length)
-	{
-		hold[i] = hold[i+1];
-		i = i + 1;
-	}
+	memmove(hold, hold+1, pattern_length - 1);
 
 	hold[pattern_length-1] = buffer[buffer_index];
 	buffer_index = buffer_index + 1;
