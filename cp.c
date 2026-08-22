@@ -24,6 +24,7 @@
 
 #define MAX_STRING 4096
 #define MAX_ARRAY 256
+#define COPY_BUFFER_SIZE 1048576
 
 /* Globals */
 int verbose;
@@ -178,17 +179,18 @@ void copy_file(char* source, char* dest)
 		fputs("'\n", stdout);
 	}
 
-	/* Open source and dest as FILE*s */
-	FILE* fsource = fopen(source, "r");
-	if(fsource == NULL)
+	/* Open source and dest, mirroring fopen(source, "r") and fopen(dest, "w") */
+	int fdsource = open(source, O_RDONLY, 0);
+	if(fdsource == -1)
 	{
 		fputs("Error opening source file ", stderr);
 		fputs(source, stderr);
 		fputc('\n', stderr);
 		exit(EXIT_FAILURE);
 	}
-	FILE* fdest = fopen(dest, "w");
-	if(fdest == NULL)
+	/* fopen(..., "w") creates with mode 0666 (the umask applies as usual) */
+	int fddest = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if(fddest == -1)
 	{
 		fputs("Error opening destination file", stderr);
 		fputs(dest, stderr);
@@ -197,19 +199,31 @@ void copy_file(char* source, char* dest)
 	}
 
 	/*
-	 * The following loop reads a character from the source and writes it to the
-	 * dest file. This is all M2-Planet supports.
+	 * The following loop copies the file in large chunks, rather than one
+	 * character at a time, to avoid per-character call overhead.
 	 */
-	int c = fgetc(fsource);
-	while(c != EOF)
+	char* buffer = malloc(COPY_BUFFER_SIZE);
+	if(NULL == buffer)
 	{
-		fputc(c, fdest);
-		c = fgetc(fsource);
+		fputs("Unable to allocate copy buffer\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+	while(TRUE)
+	{
+		int bytes_read = read(fdsource, buffer, COPY_BUFFER_SIZE);
+		/*
+		 * Just like the previous fgetc-based loop, which stopped on whatever
+		 * fgetc reported as EOF (both end-of-file and read errors), we stop
+		 * copying here without reporting an error ourselves.
+		 */
+		if(bytes_read <= 0) break;
+		write(fddest, buffer, bytes_read);
 	}
 
 	/* Cleanup */
-	fclose(fsource);
-	fclose(fdest);
+	free(buffer);
+	close(fdsource);
+	close(fddest);
 }
 
 int main(int argc, char** argv)
