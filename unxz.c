@@ -1870,7 +1870,6 @@ uint32_t LzmaDec_DecodeToDic(uint8_t* src, uint32_t srcLen)
  */
 uint32_t Preread(uint32_t r)
 {
-	uint32_t hold;
 	uint32_t p = global->readEnd - global->readCur;
 	require(r <= sizeof_readBuf, "r <= sizeof_readBuf");
 
@@ -1887,15 +1886,21 @@ uint32_t Preread(uint32_t r)
 		while(p < r)
 		{
 			/* our single spot for reading input */
-			hold = fgetc(source);
-			pos = pos + 1;
-			/* EOF or error on input. */
-			if(EOF == hold) break;
+			uint32_t want = r - p;
+			size_t got = fread(global->readEnd, 1, want, source);
 
-			/* otherwise just add it */
-			global->readEnd[0] = (0xFF & hold) | ((~0xFF) & global->readEnd[0]);
-			global->readEnd = global->readEnd + 1;
-			p = p + 1;
+			/* otherwise just add what we got */
+			global->readEnd = global->readEnd + got;
+			p = p + got;
+			pos = pos + got;
+
+			/* EOF or error on input; the old per-byte fgetc() loop counted
+			 * the failing read itself too, so keep that accounting. */
+			if(got < want)
+			{
+				pos = pos + 1;
+				break;
+			}
 		}
 	}
 
